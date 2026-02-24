@@ -206,6 +206,17 @@
       .container { flex-direction: column; align-items: center; }
       .left { min-width: 100%; }
     }
+
+    /* ✅ Hide ElevenLabs widget off-screen (keeps it working, but invisible) */
+    elevenlabs-convai#voiceAgent {
+      position: fixed;
+      left: -9999px;
+      top: -9999px;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
   </style>
 </head>
 
@@ -288,58 +299,58 @@
   </div>
 </div>
 
-<!-- ElevenLabs Voice Agent (WebRTC) -->
-<script type="module">
-  import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client/+esm";
-
-  const TOKEN_URL = "https://unrivaled-lamington-457ef3.netlify.app/.netlify/functions/token";
-
-  let conversation = null;
-  let starting = false;
-
-  async function startAgent() {
-    if (conversation || starting) return;
-    starting = true;
-
-    // Ask for mic permission first (must be in a user gesture flow)
-    await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    // Fetch short-lived token from your Netlify function
-    const res = await fetch(TOKEN_URL, { cache: "no-store" });
-    const data = await res.json();
-    if (!data?.token) throw new Error("Token endpoint did not return a token");
-
-    // Start voice session
-    conversation = await Conversation.startSession({
-      conversationToken: data.token,
-      connectionType: "webrtc",
-      onConnect: () => console.log("✅ ElevenLabs connected"),
-      onDisconnect: () => console.log("🛑 ElevenLabs disconnected"),
-      onError: (e) => console.error("❌ ElevenLabs error", e),
-    });
-
-    starting = false;
-  }
-
-  async function stopAgent() {
-    if (!conversation) return;
-    try {
-      await conversation.endSession();
-    } finally {
-      conversation = null;
-    }
-  }
-
-  // Expose for non-module scripts
-  window.__startAgent = startAgent;
-  window.__stopAgent = stopAgent;
-</script>
-
 <script>
   let isActive = false;
   let timerInterval = null;
   let waveformInterval = null;
   let seconds = 0;
+
+  function openElevenLabsWidget() {
+    const widget = document.getElementById("voiceAgent");
+    if (!widget) return;
+
+    const tryClick = () => {
+      if (!widget.shadowRoot) return false;
+
+      // Try the most likely button targets (internals can change)
+      const candidates = [
+        widget.shadowRoot.querySelector("button"),
+        widget.shadowRoot.querySelector('[role="button"]'),
+        widget.shadowRoot.querySelector('div[role="button"]'),
+        widget.shadowRoot.querySelector("div"),
+      ].filter(Boolean);
+
+      if (candidates.length) {
+        candidates[0].click();
+        return true;
+      }
+      return false;
+    };
+
+    if (tryClick()) return;
+
+    let retries = 0;
+    const maxRetries = 30;
+    const interval = setInterval(() => {
+      retries++;
+      if (tryClick() || retries >= maxRetries) clearInterval(interval);
+    }, 200);
+  }
+
+  function closeElevenLabsWidget() {
+    const widget = document.getElementById("voiceAgent");
+    if (!widget || !widget.shadowRoot) return;
+
+    // Best-effort: try to find a close/hangup button inside the widget UI
+    const candidates = Array.from(widget.shadowRoot.querySelectorAll("button, [role='button'], div[role='button']"));
+    const closeBtn = candidates.find(el => {
+      const t = (el.innerText || "").toLowerCase();
+      const a = (el.getAttribute("aria-label") || "").toLowerCase();
+      return t.includes("end") || t.includes("hang") || t.includes("close") || a.includes("end") || a.includes("hang") || a.includes("close");
+    });
+
+    if (closeBtn) closeBtn.click();
+  }
 
   async function toggleCall() {
     const btn = document.getElementById('callBtn');
@@ -357,13 +368,8 @@
       statusBar.style.background = "#991b1b";
       statusTxt.textContent = "CALL IS LIVE: Good luck";
 
-      // Start ElevenLabs agent
-      try {
-        await window.__startAgent();
-      } catch (e) {
-        console.error(e);
-        statusTxt.textContent = "Couldn’t start voice agent (check mic permissions / token)";
-      }
+      // ✅ Start ElevenLabs agent via widget
+      openElevenLabsWidget();
 
       timerInterval = setInterval(() => {
         seconds++;
@@ -389,15 +395,18 @@
       dur.textContent = "0:00";
       document.querySelectorAll('.bar').forEach(b => b.style.height = '8px');
 
-      // Stop ElevenLabs agent
-      try {
-        await window.__stopAgent();
-      } catch (e) {
-        console.error(e);
-      }
+      // ✅ Best-effort stop via widget UI
+      closeElevenLabsWidget();
     }
   }
 </script>
+
+<!-- ✅ ElevenLabs widget present (hidden off-screen) -->
+<elevenlabs-convai
+  id="voiceAgent"
+  agent-id="agent_7301khm74md3eqzttmj1ay38f65c">
+</elevenlabs-convai>
+<script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
 
 </body>
 </html>
