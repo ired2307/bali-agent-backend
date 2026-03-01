@@ -206,17 +206,6 @@
       .container { flex-direction: column; align-items: center; }
       .left { min-width: 100%; }
     }
-
-    /* ✅ Hide ElevenLabs widget off-screen (keeps it working, but invisible) */
-    elevenlabs-convai#voiceAgent {
-      position: fixed;
-      left: -9999px;
-      top: -9999px;
-      width: 1px;
-      height: 1px;
-      opacity: 0;
-      pointer-events: none;
-    }
   </style>
 </head>
 
@@ -299,58 +288,13 @@
   </div>
 </div>
 
+<script src="https://elevenlabs.io/convai-sdk/index.js"></script>
+
 <script>
-  let isActive = false;
+  let conversation = null;
   let timerInterval = null;
   let waveformInterval = null;
   let seconds = 0;
-
-  function openElevenLabsWidget() {
-    const widget = document.getElementById("voiceAgent");
-    if (!widget) return;
-
-    const tryClick = () => {
-      if (!widget.shadowRoot) return false;
-
-      // Try the most likely button targets (internals can change)
-      const candidates = [
-        widget.shadowRoot.querySelector("button"),
-        widget.shadowRoot.querySelector('[role="button"]'),
-        widget.shadowRoot.querySelector('div[role="button"]'),
-        widget.shadowRoot.querySelector("div"),
-      ].filter(Boolean);
-
-      if (candidates.length) {
-        candidates[0].click();
-        return true;
-      }
-      return false;
-    };
-
-    if (tryClick()) return;
-
-    let retries = 0;
-    const maxRetries = 30;
-    const interval = setInterval(() => {
-      retries++;
-      if (tryClick() || retries >= maxRetries) clearInterval(interval);
-    }, 200);
-  }
-
-  function closeElevenLabsWidget() {
-    const widget = document.getElementById("voiceAgent");
-    if (!widget || !widget.shadowRoot) return;
-
-    // Best-effort: try to find a close/hangup button inside the widget UI
-    const candidates = Array.from(widget.shadowRoot.querySelectorAll("button, [role='button'], div[role='button']"));
-    const closeBtn = candidates.find(el => {
-      const t = (el.innerText || "").toLowerCase();
-      const a = (el.getAttribute("aria-label") || "").toLowerCase();
-      return t.includes("end") || t.includes("hang") || t.includes("close") || a.includes("end") || a.includes("hang") || a.includes("close");
-    });
-
-    if (closeBtn) closeBtn.click();
-  }
 
   async function toggleCall() {
     const btn = document.getElementById('callBtn');
@@ -359,54 +303,76 @@
     const statusBar = document.getElementById('statusBar');
     const statusTxt = document.getElementById('statusText');
 
-    isActive = !isActive;
+    if (!conversation) {
+      // STARTING THE CALL
+      try {
+        statusTxt.textContent = "Connecting...";
+        
+        // Request mic access
+        await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    if (isActive) {
-      btn.classList.add('active');
-      wave.classList.add('active');
-      dur.classList.add('show');
-      statusBar.style.background = "#991b1b";
-      statusTxt.textContent = "CALL IS LIVE: Good luck";
+        // Use SDK to start the session
+        conversation = await ElevenLabsConvAI.Conversation.startSession({
+          agentId: "agent_7301khm74md3eqzttmj1ay38f65c", 
+          onConnect: () => {
+            btn.classList.add('active');
+            wave.classList.add('active');
+            dur.classList.add('show');
+            statusBar.style.background = "#991b1b";
+            statusTxt.textContent = "CALL IS LIVE: Good luck";
+            
+            // Start Timer
+            timerInterval = setInterval(() => {
+              seconds++;
+              dur.textContent = Math.floor(seconds/60) + ":" + (seconds%60).toString().padStart(2,'0');
+            }, 1000);
 
-      // ✅ Start ElevenLabs agent via widget
-      openElevenLabsWidget();
-
-      timerInterval = setInterval(() => {
-        seconds++;
-        dur.textContent = Math.floor(seconds/60) + ":" + (seconds%60).toString().padStart(2,'0');
-      }, 1000);
-
-      waveformInterval = setInterval(() => {
-        document.querySelectorAll('.bar').forEach(b => {
-          b.style.height = `${(Math.random() * 45 + 5)}px`;
+            // Start Waveform Animation
+            waveformInterval = setInterval(() => {
+              document.querySelectorAll('.bar').forEach(b => {
+                b.style.height = `${(Math.random() * 45 + 5)}px`;
+              });
+            }, 70);
+          },
+          onDisconnect: () => {
+            conversation = null;
+            resetUI();
+          },
+          onError: (err) => {
+            console.error(err);
+            statusTxt.textContent = "Error connecting. Check console.";
+          }
         });
-      }, 70);
-
+      } catch (err) {
+        console.error(err);
+        statusTxt.textContent = "Mic access denied.";
+      }
     } else {
-      btn.classList.remove('active');
-      wave.classList.remove('active');
-      dur.classList.remove('show');
-      statusBar.style.background = "#1f2937";
-      statusTxt.textContent = "Call Ended. Well Done!";
-
-      clearInterval(timerInterval);
-      clearInterval(waveformInterval);
-      seconds = 0;
-      dur.textContent = "0:00";
-      document.querySelectorAll('.bar').forEach(b => b.style.height = '8px');
-
-      // ✅ Best-effort stop via widget UI
-      closeElevenLabsWidget();
+      // ENDING THE CALL
+      await conversation.endSession();
     }
   }
-</script>
 
-<!-- ✅ ElevenLabs widget present (hidden off-screen) -->
-<elevenlabs-convai
-  id="voiceAgent"
-  agent-id="agent_7301khm74md3eqzttmj1ay38f65c">
-</elevenlabs-convai>
-<script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+  function resetUI() {
+    const btn = document.getElementById('callBtn');
+    const wave = document.getElementById('waveform');
+    const dur = document.getElementById('duration');
+    const statusBar = document.getElementById('statusBar');
+    const statusTxt = document.getElementById('statusText');
+
+    btn.classList.remove('active');
+    wave.classList.remove('active');
+    dur.classList.remove('show');
+    statusBar.style.background = "#1f2937";
+    statusTxt.textContent = "Call Ended. Well Done!";
+
+    clearInterval(timerInterval);
+    clearInterval(waveformInterval);
+    seconds = 0;
+    dur.textContent = "0:00";
+    document.querySelectorAll('.bar').forEach(b => b.style.height = '8px');
+  }
+</script>
 
 </body>
 </html>
